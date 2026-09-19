@@ -208,3 +208,120 @@ class NestedInlineTableTest {
         )
     }
 }
+
+/**
+ * Combined coverage for inline tables interacting with nested arrays, dotted
+ * keys, arrays of tables and end-of-file boundaries.
+ */
+class NestedInlineTableTestExtended {
+    @Serializable
+    data class InlineWithArrays(val b: List<Long>, val c: InlineWithArraysInner)
+
+    @Serializable
+    data class InlineWithArraysInner(val d: List<Long>)
+
+    @Serializable
+    data class RootWithInline(val a: InlineWithArrays)
+
+    @Serializable
+    data class DottedInlineInner(val c: Long, val d: List<Long>)
+
+    @Serializable
+    data class Physical(val color: String)
+
+    @Serializable
+    data class Fruit(val physical: Physical)
+
+    @Serializable
+    data class Basket(val fruits: List<Fruit>)
+
+    @Serializable
+    data class SimpleInline(val b: Long)
+
+    @Serializable
+    data class SimpleInlineRoot(val a: SimpleInline)
+
+    @Test
+    fun inlineTableWithNestedArrayAndNestedTable() {
+        val input = "a = { b = [1, 2], c = { d = [3] } }"
+        val parsedToml = Toml.tomlParser.parseString(input)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([a])
+                |         - TomlTable ([a.c])
+                |             - TomlKeyValueArray (d=[ 3 ])
+                |         - TomlKeyValueArray (b=[ 1, 2 ])
+                |
+            """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+        assertEquals(
+            RootWithInline(InlineWithArrays(listOf(1, 2), InlineWithArraysInner(listOf(3)))),
+            Toml.decodeFromString<RootWithInline>(input)
+        )
+    }
+
+    @Test
+    fun dottedKeyHoldingInlineTableWithArray() {
+        val input = "a.b = { c = 1, d = [2, 3] }"
+        val parsedToml = Toml.tomlParser.parseString(input)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([a.b])
+                |         - TomlKeyValuePrimitive (c=1)
+                |         - TomlKeyValueArray (d=[ 2, 3 ])
+                |
+            """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+        assertEquals(
+            DottedInlineInner(1, listOf(2, 3)),
+            Toml.partiallyDecodeFromString(DottedInlineInner.serializer(), input, "a.b")
+        )
+    }
+
+    @Test
+    fun inlineTableInsideArrayOfTables() {
+        val input = "[[fruits]]\nphysical = { color = \"red\" }\n[[fruits]]\nphysical = { color = \"green\" }"
+        val parsedToml = Toml.tomlParser.parseString(input)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([[fruits]])
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlTable ([fruits.physical])
+                |                 - TomlKeyValuePrimitive (color="red")
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlTable ([fruits.physical])
+                |                 - TomlKeyValuePrimitive (color="green")
+                |
+            """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+        assertEquals(
+            Basket(listOf(Fruit(Physical("red")), Fruit(Physical("green")))),
+            Toml.decodeFromString<Basket>(input)
+        )
+    }
+
+    @Test
+    fun inlineTableAtEndOfFileWithoutNewline() {
+        val input = "a = { b = 1 }"
+        val parsedToml = Toml.tomlParser.parseString(input)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([a])
+                |         - TomlKeyValuePrimitive (b=1)
+                |
+            """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+        assertEquals(
+            SimpleInlineRoot(SimpleInline(1)),
+            Toml.decodeFromString<SimpleInlineRoot>(input)
+        )
+    }
+}

@@ -1,6 +1,8 @@
 package com.akuleshov7.ktoml.parsers
 
+import com.akuleshov7.ktoml.Toml
 import com.akuleshov7.ktoml.Toml.Default.tomlParser
+import kotlinx.serialization.decodeFromString
 import com.akuleshov7.ktoml.tree.nodes.TomlArrayOfTablesElement
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -641,6 +643,157 @@ class ArraysOfTablesTest {
                 |
                """.trimMargin(),
             parsedToml.prettyStr()
+        )
+    }
+}
+
+/**
+ * Combined coverage for arrays of tables interacting with following
+ * sub-tables, dotted keys, multiline strings, duplicate keys and
+ * end-of-file boundaries.
+ */
+class ArraysOfTablesTestExtended {
+    @kotlinx.serialization.Serializable
+    data class Physical(val color: String)
+
+    @kotlinx.serialization.Serializable
+    data class Fruit(val name: String, val physical: Physical? = null)
+
+    @kotlinx.serialization.Serializable
+    data class Basket(val fruits: List<Fruit>)
+
+    @kotlinx.serialization.Serializable
+    data class ColoredFruit(val physical: Physical)
+
+    @kotlinx.serialization.Serializable
+    data class ColoredBasket(val fruits: List<ColoredFruit>)
+
+    @kotlinx.serialization.Serializable
+    data class SimpleElement(val a: Long)
+
+    @kotlinx.serialization.Serializable
+    data class SimpleBucket(val f: List<SimpleElement>)
+
+    @kotlinx.serialization.Serializable
+    data class TextElement(val s: String)
+
+    @kotlinx.serialization.Serializable
+    data class TextBucket(val f: List<TextElement>)
+
+    @Test
+    fun subTableAfterElementBelongsToLatestElement() {
+        val input = """
+            [[fruits]]
+            name = "apple"
+            [fruits.physical]
+            color = "red"
+            [[fruits]]
+            name = "banana"
+        """.trimIndent()
+        val parsedToml = tomlParser.parseString(input)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([[fruits]])
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (name="apple")
+                |             - TomlTable ([fruits.physical])
+                |                 - TomlKeyValuePrimitive (color="red")
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (name="banana")
+                |
+            """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+        assertEquals(
+            Basket(listOf(Fruit("apple", Physical("red")), Fruit("banana"))),
+            Toml.decodeFromString<Basket>(input)
+        )
+    }
+
+    @Test
+    fun dottedKeyInsideArrayOfTablesStaysInLatestElement() {
+        val input = """
+            [[fruits]]
+            physical.color = "red"
+            [[fruits]]
+            physical.color = "green"
+        """.trimIndent()
+        val parsedToml = tomlParser.parseString(input)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([[fruits]])
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlTable ([fruits.physical])
+                |                 - TomlKeyValuePrimitive (color="red")
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlTable ([fruits.physical])
+                |                 - TomlKeyValuePrimitive (color="green")
+                |
+            """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+        assertEquals(
+            ColoredBasket(listOf(ColoredFruit(Physical("red")), ColoredFruit(Physical("green")))),
+            Toml.decodeFromString<ColoredBasket>(input)
+        )
+    }
+
+    @Test
+    fun arrayOfTablesAtEndOfFileWithoutNewline() {
+        val input = "[[f]]\na = 1"
+        val parsedToml = tomlParser.parseString(input)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([[f]])
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (a=1)
+                |
+            """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+        assertEquals(
+            SimpleBucket(listOf(SimpleElement(1))),
+            Toml.decodeFromString<SimpleBucket>(input)
+        )
+    }
+
+    @Test
+    fun multilineBasicStringInsideArrayOfTables() {
+        val input = "[[f]]\ns = \"\"\"l1\nl2\"\"\"\n[[f]]\ns = \"\"\"m1\"\"\""
+        val parsedToml = tomlParser.parseString(input)
+        val table = parsedToml.children.single() as com.akuleshov7.ktoml.tree.nodes.TomlTable
+        assertEquals(2, table.children.size)
+        val first = table.children[0].children.single() as com.akuleshov7.ktoml.tree.nodes.TomlKeyValuePrimitive
+        val second = table.children[1].children.single() as com.akuleshov7.ktoml.tree.nodes.TomlKeyValuePrimitive
+        assertEquals("l1\nl2", first.value.content)
+        assertEquals("m1", second.value.content)
+        assertEquals(
+            TextBucket(listOf(TextElement("l1\nl2"), TextElement("m1"))),
+            Toml.decodeFromString<TextBucket>(input)
+        )
+    }
+
+    @Test
+    fun duplicateKeyInsideSingleArrayElement() {
+        val input = "[[f]]\na = 1\na = 2"
+        val parsedToml = tomlParser.parseString(input)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([[f]])
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (a=1)
+                |             - TomlKeyValuePrimitive (a=2)
+                |
+            """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+        assertEquals(
+            SimpleBucket(listOf(SimpleElement(2))),
+            Toml.decodeFromString<SimpleBucket>(input)
         )
     }
 }

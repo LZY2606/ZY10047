@@ -107,6 +107,9 @@ configureSigning()
 
 tasks.withType<KotlinJvmTest> {
     useJUnitPlatform()
+    testLogging {
+        events("PASSED", "FAILED", "SKIPPED")
+    }
 }
 
 // it is too time-consuming to support those tests
