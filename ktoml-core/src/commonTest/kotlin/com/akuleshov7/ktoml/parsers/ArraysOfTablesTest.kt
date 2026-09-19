@@ -1,7 +1,10 @@
 package com.akuleshov7.ktoml.parsers
 
+import com.akuleshov7.ktoml.Toml
 import com.akuleshov7.ktoml.Toml.Default.tomlParser
 import com.akuleshov7.ktoml.tree.nodes.TomlArrayOfTablesElement
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -641,6 +644,166 @@ class ArraysOfTablesTest {
                 |
                """.trimMargin(),
             parsedToml.prettyStr()
+        )
+    }
+
+    @Serializable
+    data class Fruit(val name: String, val physical: Physical? = null)
+
+    @Serializable
+    data class Physical(val color: String, val weight: Double? = null)
+
+    @Serializable
+    data class Basket(val fruits: List<Fruit>)
+
+    @Test
+    fun subtableAfterFirstArrayElement() {
+        val string = """
+            [[fruits]]
+            name = "apple"
+            [fruits.physical]
+            color = "red"
+            [[fruits]]
+            name = "banana"
+        """.trimIndent()
+
+        val parsedToml = tomlParser.parseString(string)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([[fruits]])
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (name="apple")
+                |             - TomlTable ([fruits.physical])
+                |                 - TomlKeyValuePrimitive (color="red")
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (name="banana")
+                |
+        """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+
+        assertEquals(
+            Basket(
+                listOf(
+                    Fruit("apple", Physical("red")),
+                    Fruit("banana")
+                )
+            ),
+            Toml.decodeFromString<Basket>(string)
+        )
+    }
+
+    @Test
+    fun subtableAttachesToLatestArrayElement() {
+        val string = """
+            [[fruits]]
+            name = "apple"
+            [[fruits]]
+            name = "banana"
+            [fruits.physical]
+            color = "yellow"
+        """.trimIndent()
+
+        val parsedToml = tomlParser.parseString(string)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([[fruits]])
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (name="apple")
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (name="banana")
+                |             - TomlTable ([fruits.physical])
+                |                 - TomlKeyValuePrimitive (color="yellow")
+                |
+        """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+
+        assertEquals(
+            Basket(
+                listOf(
+                    Fruit("apple"),
+                    Fruit("banana", Physical("yellow"))
+                )
+            ),
+            Toml.decodeFromString<Basket>(string)
+        )
+    }
+
+    @Test
+    fun dottedKeyInsideArrayOfTablesElement() {
+        val string = """
+            [[fruits]]
+            name = "apple"
+            physical.color = "red"
+            [[fruits]]
+            name = "banana"
+        """.trimIndent()
+
+        val parsedToml = tomlParser.parseString(string)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([[fruits]])
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (name="apple")
+                |             - TomlTable ([fruits.physical])
+                |                 - TomlKeyValuePrimitive (color="red")
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (name="banana")
+                |
+        """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+
+        assertEquals(
+            Basket(
+                listOf(
+                    Fruit("apple", Physical("red")),
+                    Fruit("banana")
+                )
+            ),
+            Toml.decodeFromString<Basket>(string)
+        )
+    }
+
+    @Test
+    fun inlineTableInsideArrayOfTablesElement() {
+        val string = """
+            [[fruits]]
+            name = "apple"
+            physical = { color = "red", weight = 1.5 }
+            [[fruits]]
+            name = "banana"
+        """.trimIndent()
+
+        val parsedToml = tomlParser.parseString(string)
+        assertEquals(
+            """
+                | - TomlFile (rootNode)
+                |     - TomlTable ([[fruits]])
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (name="apple")
+                |             - TomlTable ([fruits.physical])
+                |                 - TomlKeyValuePrimitive (color="red")
+                |                 - TomlKeyValuePrimitive (weight=1.5)
+                |         - TomlArrayOfTablesElement (technical_node)
+                |             - TomlKeyValuePrimitive (name="banana")
+                |
+        """.trimMargin(),
+            parsedToml.prettyStr()
+        )
+
+        assertEquals(
+            Basket(
+                listOf(
+                    Fruit("apple", Physical("red", 1.5)),
+                    Fruit("banana")
+                )
+            ),
+            Toml.decodeFromString<Basket>(string)
         )
     }
 }
