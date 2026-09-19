@@ -1,0 +1,341 @@
+package com.akuleshov7.ktoml.encoders
+
+import com.akuleshov7.ktoml.Toml
+import com.akuleshov7.ktoml.TomlOutputConfig
+import com.akuleshov7.ktoml.annotations.*
+import com.akuleshov7.ktoml.utils.isControlChar
+import com.akuleshov7.ktoml.writers.IntegerRepresentation.*
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlin.test.Test
+
+class EncodingAnnotationTest {
+    @Test
+    fun commentedPairTest() {
+        @Serializable
+        data class File(
+            @TomlComments("Single comment", inline = "")
+            val a: Long = 3,
+            @TomlComments("Comment 1", "Comment 2", inline = "")
+            val b: String = "test",
+            @TomlComments(inline = "Inline comment")
+            val c: Boolean = true,
+            @TomlComments(
+                "Comment 1",
+                "Comment 2",
+                inline = "Inline comment"
+            )
+            val d: Double = Double.NaN
+        )
+
+        assertEncodedEquals(
+            value = File(),
+            expectedToml = """
+                # Single comment
+                a = 3
+                # Comment 1
+                # Comment 2
+                b = "test"
+                c = true # Inline comment
+                # Comment 1
+                # Comment 2
+                d = nan # Inline comment
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun commentedTableTest() {
+        @Serializable
+        data class TableA(val a: String = "")
+
+        @Serializable
+        data class TableB(val b: Long = 7)
+
+        @Serializable
+        data class File(
+            @TomlComments("Comment 1", "Comment 2", inline = "")
+            val tableA: TableA = TableA(),
+            @TomlComments(inline = "Inline comment")
+            val tableB: TableB = TableB()
+        )
+
+        assertEncodedEquals(
+            value = File(),
+            expectedToml = """
+                # Comment 1
+                # Comment 2
+                [tableA]
+                    a = ""
+                
+                [tableB] # Inline comment
+                    b = 7
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun basicInlineTableTest()
+    {
+        @Serializable
+        @TomlInlineTable
+        data class InlineTableA(
+            val a1: String = "test",
+            val a2: String = "test"
+        )
+
+        @Serializable
+        data class InlineTableB(val b: Boolean = false)
+
+        @Serializable
+        data class File(
+            val a: InlineTableA = InlineTableA(),
+            @TomlInlineTable
+            val b1: InlineTableB = InlineTableB(),
+            //val b2: @TomlInlineTable InlineTableB = InlineTableB()
+        )
+
+        assertEncodedEquals(
+            value = File(),
+            expectedToml = """
+                a = { a1 = "test", a2 = "test" }
+                b1 = { b = false }
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun nestedInlineTableTest() {
+        @Serializable
+        data class InlineTable(val message: String)
+
+        @Serializable
+        @TomlInlineTable
+        data class NestedInlineTable(
+            val inner1: InlineTable = InlineTable("a"),
+            val inner2: InlineTable = InlineTable("b"),
+        )
+
+        @Serializable
+        data class File(
+            val nested: NestedInlineTable = NestedInlineTable()
+        )
+
+        assertEncodedEquals(
+            value = File(),
+            expectedToml = """nested = { inner1 = { message = "a" }, inner2 = { message = "b" } }""",
+            tomlInstance = Toml(
+                outputConfig = TomlOutputConfig(explicitTables = true)
+            )
+        )
+    }
+
+    @Test
+    fun multilineArrayTest() {
+        @Serializable
+        data class File(
+            @TomlMultiline
+            val words: List<String> =
+                    listOf(
+                        "the", "quick", "brown",
+                        "fox", "jumps", "over",
+                        "the", "lazy", "dog"
+                    ),
+            @TomlMultiline
+            val fib: List<Long> =
+                    listOf(1, 1, 2, 3, 5, 8, 13)
+        )
+
+        assertEncodedEquals(
+            value = File(),
+            expectedToml = """
+                words = [
+                    "the",
+                    "quick",
+                    "brown",
+                    "fox",
+                    "jumps",
+                    "over",
+                    "the",
+                    "lazy",
+                    "dog"
+                ]
+                
+                fib = [
+                    1,
+                    1,
+                    2,
+                    3,
+                    5,
+                    8,
+                    13
+                ]
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun integerRepresentationTest() {
+        @Serializable
+        data class File(
+            @TomlInteger(DECIMAL)
+            val dec: Long = 0,
+            @TomlInteger(BINARY)
+            val bin: Long = 2,
+            @TomlInteger(GROUPED)
+            val gro: Long = 9_999_099_009,
+            @TomlInteger(HEX)
+            val hex: Long = 4,
+            @TomlInteger(OCTAL)
+            val oct: Long = 6,
+        )
+
+        assertEncodedEquals(
+            value = File(),
+            expectedToml = """
+                dec = 0
+                bin = 0b10
+                gro = 9_999_099_009
+                hex = 0x4
+                oct = 0o6
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun unsignedIntegerRepresentationTest() {
+        @Serializable
+        data class File(
+            @TomlInteger(DECIMAL)
+            val dec: ULong = 0u,
+            @TomlInteger(BINARY)
+            val bin: ULong = 2u,
+            @TomlInteger(GROUPED)
+            val gro: ULong = 9_999_099_009u,
+            @TomlInteger(HEX)
+            val hex: ULong = 4u,
+            @TomlInteger(OCTAL)
+            val oct: ULong = 6u,
+        )
+
+        assertEncodedEquals(
+            value = File(),
+            expectedToml = """
+                dec = 0
+                bin = 0b10
+                gro = 9_999_099_009
+                hex = 0x4
+                oct = 0o6
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun literalStringTest() {
+        @Serializable
+        data class File(
+            @TomlLiteral
+            val regex: String = """/[a-z-_]+|"[^"]+"/""",
+            //val quote: @TomlLiteral String = "\"hello!\""
+        )
+
+        assertEncodedEquals(
+            value = File(),
+            expectedToml = """regex = '/[a-z-_]+|"[^"]+"/'"""
+        )
+    }
+
+    @Test
+    fun multilineStringTest() {
+        @Serializable
+        data class File(
+            @TomlMultiline
+            val mlTextA: String = "\n\\tMultiline\ntext!\n",
+            @TomlMultiline
+            val mlTextB: String = "\nText with escaped quotes \"\"\"\\\nand line break\n",
+            @TomlLiteral
+            @TomlMultiline
+            val mlTextC: String = "\n\"Multiline\ntext!\"\n"
+        )
+        val tripleQuotes = "\"\"\""
+
+        assertEncodedEquals(
+            value = File(),
+            expectedToml = """
+                mlTextA = $tripleQuotes
+                
+                \\tMultiline
+                text!
+                
+                $tripleQuotes
+                mlTextB = $tripleQuotes
+                
+                Text with escaped quotes ""\"\
+                and line break
+                
+                $tripleQuotes
+                mlTextC = '''
+                
+                "Multiline
+                text!"
+                
+                '''
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun encodeBackslashesInMultiline() {
+        @Serializable
+        data class Reproducer(
+            @TomlMultiline
+            val foo: String
+        )
+        val tripleQuotes = "\"\"\""
+
+        assertEncodedEquals(
+            Reproducer("\\\\, \\\""),
+            """
+                foo = $tripleQuotes
+                \\\\, \\"
+                $tripleQuotes
+            """.trimIndent()
+        )
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    @Test
+    fun encodeDefaultAnnotation() {
+        @Serializable
+        data class Foo(
+            @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+            val a: Int = 1,
+            @EncodeDefault(EncodeDefault.Mode.NEVER)
+            val b: Int = 2,
+            val c: Int = 3
+        )
+
+        assertEncodedEquals(
+            value = Foo(),
+            expectedToml = """
+                a = 1
+                c = 3
+            """.trimIndent(),
+        )
+
+        assertEncodedEquals(
+            value = Foo(),
+            expectedToml = """
+                a = 1
+            """.trimIndent(),
+            tomlInstance = Toml(
+                outputConfig = TomlOutputConfig(
+                    ignoreDefaultValues = true,
+                )
+            )
+        )
+    }
+}
